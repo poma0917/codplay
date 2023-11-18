@@ -7,7 +7,7 @@ import lxml
 import requests
 from bs4 import BeautifulSoup
 
-browser = webdriver.Chrome()
+browser = webdriver.Chrome(ChromeDriverManager().install())
 url = "https://comic.naver.com/webtoon?tab=sat"
 
 browser.get(url)
