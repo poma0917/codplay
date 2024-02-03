@@ -1,69 +1,275 @@
 import pygame
 import sys
+import random
 
 # 초기화
 pygame.init()
 
-# 화면 설정
-screen_width, screen_height = 1200, 600
-screen = pygame.display.set_mode((screen_width, screen_height))
-pygame.display.set_caption("Survival Jump")
+# 창 설정
+width, height = 1980, 1080
+screen = pygame.display.set_mode((width, height))
+pygame.display.set_caption("Garbage Collector Game")
 
-# 색상 정의
+# 색깔 정의
 white = (255, 255, 255)
+blue = (0, 0, 255)
+green = (0, 255, 0)
 
-# 주인공 설정
-player_size = 50
-player_x = screen_width // 2 - player_size // 2
-player_y = screen_height - player_size * 2
-player_speed = 5
+# 로봇 캐릭터 설정
+robot_size = 80
+robot_x = width // 2 - robot_size // 2
+robot_y = height - robot_size
+robot_speed = 10  # 로봇 캐릭터 속도를 높임
 
-# 떠다니는 조각 설정
-platform_width = 100
-platform_height = 20
-platform_speed = 5
+# 초기 로봇 위치 저장
+initial_robot_x = robot_x
+initial_robot_y = robot_y
 
-# 맵 설정
-current_map = [
-    (100, screen_height - 100, platform_width, platform_height),
-    # 현재 맵의 요소들을 정의합니다.
+# 점프 설정
+jump_height = 15
+jumping = False
+jump_count = jump_height
+
+# 쓰레기 설정
+garbage_size = 50
+garbage_speed = 12  # 쓰레기 속도를 높임
+garbage_list = []
+
+# 장애물 설정
+obstacle_size = 100
+obstacle_x = width
+obstacle_y = height - obstacle_size
+obstacle_speed = 8  # 장애물 속도를 높임
+
+# 상점 아이템 설정
+shop_items = [
+    {"name": "장애물 속도 감소", "cost": 50, "effect": 0.8},  # 1번 아이템: 장애물 속도 감소
+    {"name": "로봇 속도 증가", "cost": 50, "effect": 1.2},  # 2번 아이템: 로봇 속도 증가
+    {"name": "쓰레기 생성량 증가", "cost": 50, "effect": 1.5},  # 3번 아이템: 쓰레기 생성량 증가
 ]
 
-def draw_map(map_elements):
-    for element in map_elements:
-        pygame.draw.rect(screen, (0, 0, 255), element)
+# 상점 상태 및 선택된 아이템 초기화
+shop_open = False
+selected_item = None
+
+# 점수 설정
+score = 0
+target_score = 300
+
+# 폰트 설정
+font_path = "ai_project/climate_crisis/image/ChungjuKimSaeng.ttf"
+font = pygame.font.Font(font_path, 36)
+
+# 게임 상태 설정
+game_active = True
+
+# 시간 설정
+clock = pygame.time.Clock()
+spawn_timer = pygame.time.get_ticks()
+speed_increase_interval = 2000  # 2초마다 속도를 증가시킬지 설정
+
+# 함수: 다이얼로그 표시
+def show_dialog():
+    dialog_rect = pygame.Rect(width // 4, height // 4, width // 2, height // 2)
+    pygame.draw.rect(screen, white, dialog_rect)
+    pygame.draw.rect(screen, blue, dialog_rect, 5)
+
+    title_text = font.render("게임 오버", True, blue)
+    screen.blit(title_text, (width // 2 - title_text.get_width() // 2, height // 3))
+
+    question_text = font.render("게임을 재시작하시겠습니까?", True, blue)
+    screen.blit(question_text, (width // 2 - question_text.get_width() // 2, height // 2 - 20))
+
+    yes_text = font.render("예", True, blue)
+    yes_rect = pygame.Rect(
+        width // 2 - yes_text.get_width() // 2 - 50, height // 2 + 50, yes_text.get_width() + 20, 40
+    )
+    pygame.draw.rect(screen, blue, yes_rect, 5)
+    screen.blit(yes_text, (width // 2 - yes_text.get_width() // 2 - 45, height // 2 + 55))
+
+    no_text = font.render("아니요", True, blue)
+    no_rect = pygame.Rect(
+        width // 2 - no_text.get_width() // 2 + 30, height // 2 + 50, no_text.get_width() + 20, 40
+    )
+    pygame.draw.rect(screen, blue, no_rect, 5)
+    screen.blit(no_text, (width // 2 - no_text.get_width() // 2 + 35, height // 2 + 55))
+
+    pygame.display.flip()
+
+    return yes_rect, no_rect
+
+# 함수: 상점 표시
+def show_shop():
+    shop_rect = pygame.Rect(width // 4, height // 4, width // 2, height // 2)
+    pygame.draw.rect(screen, white, shop_rect)
+    pygame.draw.rect(screen, blue, shop_rect, 5)
+
+    title_text = font.render("상점", True, blue)
+    screen.blit(title_text, (width // 2 - title_text.get_width() // 2, height // 3))
+
+    for i, item in enumerate(shop_items, start=1):
+        item_text = font.render(f"{i}. {item['name']} - {item['cost']} 쓰레기", True, blue)
+        screen.blit(item_text, (width // 4 + 30, height // 3 + 50 * i))
+
+    pygame.display.flip()
+
+# 함수: 아이템 구매
+def buy_item(item_index):
+    global score, obstacle_speed, robot_speed, garbage_speed
+    item = shop_items[item_index]
+    if score >= item["cost"]:
+        score -= item["cost"]
+        if item_index == 0:  # 1번 아이템: 장애물 속도 감소
+            obstacle_speed *= item["effect"]
+        elif item_index == 1:  # 2번 아이템: 로봇 속도 증가
+            robot_speed *= item["effect"]
+        elif item_index == 2:  # 3번 아이템: 쓰레기 생성량 증가
+            garbage_speed *= item["effect"]
 
 # 게임 루프
-clock = pygame.time.Clock()
-
 while True:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                pygame.quit()
+                sys.exit()
+            elif event.key == pygame.K_p:  # P 키를 눌렀을 때 상점을 열거나 닫음
+                shop_open = not shop_open  # 현재 상태의 반대로 설정
 
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_LEFT] and player_x > 0:
-        player_x -= player_speed
-    if keys[pygame.K_RIGHT] and player_x < screen_width - player_size:
-        player_x += player_speed
+    if game_active:
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LEFT] and robot_x > 0:
+            robot_x -= robot_speed
+        if keys[pygame.K_RIGHT] and robot_x < width - robot_size:
+            robot_x += robot_speed
 
-    # 화면 업데이트
-    screen.fill(white)
+        # 점프 로직
+        if not jumping:
+            if keys[pygame.K_SPACE]:
+                jumping = True
+        else:
+            if jump_count >= -jump_height:
+                neg = 1
+                if jump_count < 0:
+                    neg = -1
+                robot_y -= (jump_count ** 2) * 0.5 * neg
+                jump_count -= 1
+            else:
+                jumping = False
+                jump_count = jump_height
 
-    # 플레이어 그리기
-    pygame.draw.rect(screen, (255, 0, 0), (player_x, player_y, player_size, player_size))
+        # 시간이 2초 경과 시 쓰레기 생성 및 속도 증가
+        current_time = pygame.time.get_ticks()
+        if current_time - spawn_timer > 1000:  # 1초마다 쓰레기 생성
+            garbage_x = random.randint(0, width - garbage_size)
+            garbage_y = 0  # 위에서 생성
+            garbage_list.append((garbage_x, garbage_y))
+            spawn_timer = current_time
+            obstacle_speed += 0.1  # 2초마다 속도 증가
 
-    # 맵 그리기
-    draw_map(current_map)
+        # 쓰레기 이동
+        for idx, garbage in enumerate(garbage_list):
+            garbage_x, garbage_y = garbage
+            garbage_y += garbage_speed
+            garbage = (garbage_x, garbage_y)
+            garbage_list[idx] = garbage
+            if garbage_y > height:
+                garbage_list.pop(idx)
 
-    # 다음 맵으로 이동
-    if player_x > screen_width:
-        # 현재 맵을 비우고 다음 맵으로 이동하는 로직을 추가
-        current_map = []  # 비우기 (다음 맵으로 이동할 때 필요한 요소들을 추가)
-        player_x = 0  # 왼쪽 끝에서 시작
+        # 장애물 이동
+        obstacle_x -= obstacle_speed
+        if obstacle_x + obstacle_size < 0:
+            obstacle_x = width
+            obstacle_speed += 0.1  # 2초마다 속도 증가
+            obstacle_y = height - obstacle_size - random.randint(0, 100)  # 장애물 높이 랜덤 설정
 
+        # 충돌 검사 - 쓰레기
+        for idx, garbage in enumerate(garbage_list):
+            if (
+                robot_x < garbage[0] + garbage_size
+                and robot_x + robot_size > garbage[0]
+                and robot_y < garbage[1] + garbage_size
+                and robot_y + robot_size > garbage[1]
+            ):
+                garbage_list.pop(idx)
+                score += 1
+
+        # 충돌 검사 - 장애물
+        if (
+            robot_x < obstacle_x + obstacle_size
+            and robot_x + robot_size > obstacle_x
+            and robot_y < obstacle_y + obstacle_size
+            and robot_y + robot_size > obstacle_y
+        ):
+            print("게임 오버!")
+            game_active = False
+
+        # 게임 승리 조건
+        if score >= target_score:
+            print("게임 승리!")
+            game_active = False
+
+        # 그리기
+        screen.fill(white)
+        pygame.draw.rect(screen, blue, (robot_x, robot_y, robot_size, robot_size))
+
+        for garbage in garbage_list:
+            pygame.draw.rect(screen, green, (*garbage, garbage_size, garbage_size))
+
+        pygame.draw.rect(screen, blue, (obstacle_x, obstacle_y, obstacle_size, obstacle_size))
+
+        # 점수 표시
+        score_text = font.render(f"Score: {score}/{target_score}", True, blue)
+        screen.blit(score_text, (10, 10))
+    else:
+        # 게임 오버 화면 표시
+        game_over_text = font.render("게임 오버!", True, (255, 0, 0))
+        screen.blit(game_over_text, (width // 2 - 150, height // 2 - 50))
+
+        if shop_open:
+            # 상점이 열려있을 때 상점 표시
+            show_shop()
+
+            # 아이템 선택
+            keys = pygame.key.get_pressed()
+            for i, item in enumerate(shop_items):
+                if keys[pygame.K_1] and selected_item is None:
+                    selected_item = 0
+                elif keys[pygame.K_2] and selected_item is None:
+                    selected_item = 1
+                elif keys[pygame.K_3] and selected_item is None:
+                    selected_item = 2
+
+            # 선택된 아이템이 있으면 구매
+            if selected_item is not None:
+                buy_item(selected_item)
+                selected_item = None
+                shop_open = False
+
+        else:
+            # 다이얼로그 표시
+            yes_rect, no_rect = show_dialog()
+
+            # 클릭 이벤트 처리
+            mouse_pos = pygame.mouse.get_pos()
+            if pygame.mouse.get_pressed()[0]:  # 0은 왼쪽 버튼을 나타냄
+                if yes_rect.collidepoint(mouse_pos):
+                    # 게임 재시작
+                    game_active = True
+                    score = 0
+                    garbage_list = []
+                    obstacle_speed = 8
+                    obstacle_x = width
+                    obstacle_y = height - obstacle_size - random.randint(0, 100)
+                    robot_x = initial_robot_x
+                    robot_y = initial_robot_y
+                elif no_rect.collidepoint(mouse_pos):
+                    pygame.quit()
+                    sys.exit()
+
+    # 업데이트
     pygame.display.flip()
-
-    # 프레임 설정
     clock.tick(30)
